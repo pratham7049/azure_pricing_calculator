@@ -1,6 +1,7 @@
 import requests
 
 BASE_URL = "https://prices.azure.com/api/retail/prices"
+SERVICE_FAMILY = "Storage"
 
 def fetch_data(filter_query):
     url = f"{BASE_URL}?$filter={filter_query}"
@@ -11,41 +12,25 @@ def fetch_data(filter_query):
     else:
         print(f"Error fetching data. Status Code: {response.status_code}")
         print(f"Response: {response.text}")
-        return None
+        return []
+
+def get_unique_values(data, key):
+    return sorted(set(item[key] for item in data if key in item))
 
 def list_regions():
-    filter_query = "serviceFamily eq 'Storage'"
-    data = fetch_data(filter_query)
-    if data:
-        regions = sorted(set(item["armRegionName"] for item in data if "armRegionName" in item))
-        return regions
-    else:
-        print("No data found. Please check the filters or try again later.")
-        return []
+    data = fetch_data(f"serviceFamily eq '{SERVICE_FAMILY}'")
+    return get_unique_values(data, "armRegionName")
 
 def list_storage_types(region):
-    filter_query = f"serviceFamily eq 'Storage' and armRegionName eq '{region}'"
-    data = fetch_data(filter_query)
-    if data:
-        storage_types = sorted(set(item["productName"] for item in data if "productName" in item))
-        return storage_types
-    else:
-        print("No data found. Please check the filters or try again later.")
-        return []
+    data = fetch_data(f"serviceFamily eq '{SERVICE_FAMILY}' and armRegionName eq '{region}'")
+    return get_unique_values(data, "productName")
 
 def list_storage_tiers(region, storage_type):
-    filter_query = f"serviceFamily eq 'Storage' and armRegionName eq '{region}' and productName eq '{storage_type}'"
-    data = fetch_data(filter_query)
-    if data:
-        storage_tiers = sorted(set(item["skuName"] for item in data if "skuName" in item))
-        return storage_tiers
-    else:
-        print("No data found. Please check the filters or try again later.")
-        return []
+    data = fetch_data(f"serviceFamily eq '{SERVICE_FAMILY}' and armRegionName eq '{region}' and productName eq '{storage_type}'")
+    return get_unique_values(data, "skuName")
 
 def get_pricing(region, storage_type, storage_tier):
-    filter_query = f"serviceFamily eq 'Storage' and armRegionName eq '{region}' and productName eq '{storage_type}' and skuName eq '{storage_tier}'"
-    data = fetch_data(filter_query)
+    data = fetch_data(f"serviceFamily eq '{SERVICE_FAMILY}' and armRegionName eq '{region}' and productName eq '{storage_type}' and skuName eq '{storage_tier}'")
     if data:
         print("\n===== Pricing Details =====")
         for item in data:
@@ -58,42 +43,50 @@ def get_pricing(region, storage_type, storage_tier):
     else:
         print("No pricing data found. Please check the filters or try again later.")
 
+def get_user_selection(options, prompt):
+    while True:
+        try:
+            choice = int(input(prompt)) - 1
+            if 0 <= choice < len(options):
+                return options[choice]
+            else:
+                print("Invalid selection. Please try again.")
+        except ValueError:
+            print("Please enter a valid number.")
+
 if __name__ == "__main__":
     print("\n===== Fetching Available Azure Regions =====")
     regions = list_regions()
     if not regions:
-        exit()
+        exit("No regions found. Please check the filters or try again later.")
     
     print("\nAvailable Azure Regions:")
     for i, region in enumerate(regions):
         print(f"{i+1}. {region}")
     
-    region_choice = int(input("\nSelect a region by number: ")) - 1
-    selected_region = regions[region_choice]
+    selected_region = get_user_selection(regions, "\nSelect a region by number: ")
     
     print(f"\n===== Fetching Storage Types for Region: {selected_region} =====")
     storage_types = list_storage_types(selected_region)
     if not storage_types:
-        exit()
+        exit("No storage types found. Please check the filters or try again later.")
     
     print("\nAvailable Storage Types:")
     for i, storage_type in enumerate(storage_types):
         print(f"{i+1}. {storage_type}")
     
-    storage_type_choice = int(input("\nSelect a storage type by number: ")) - 1
-    selected_storage_type = storage_types[storage_type_choice]
+    selected_storage_type = get_user_selection(storage_types, "\nSelect a storage type by number: ")
 
     print(f"\n===== Fetching Storage Tiers for {selected_storage_type} in {selected_region} =====")
     storage_tiers = list_storage_tiers(selected_region, selected_storage_type)
     if not storage_tiers:
-        exit()
+        exit("No storage tiers found. Please check the filters or try again later.")
 
     print("\nAvailable Storage Tiers:")
     for i, storage_tier in enumerate(storage_tiers):
         print(f"{i+1}. {storage_tier}")
     
-    storage_tier_choice = int(input("\nSelect a storage tier by number: ")) - 1
-    selected_storage_tier = storage_tiers[storage_tier_choice]
+    selected_storage_tier = get_user_selection(storage_tiers, "\nSelect a storage tier by number: ")
 
     print(f"\n===== Fetching Pricing for {selected_storage_type} - {selected_storage_tier} in {selected_region} =====")
     get_pricing(selected_region, selected_storage_type, selected_storage_tier)
