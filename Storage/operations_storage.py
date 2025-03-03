@@ -1,120 +1,102 @@
 import requests
 
-STORAGE_API_URL = "https://azure.microsoft.com/api/v3/pricing/storage/calculator/?culture=en-in&discount=mca"
+AZURE_STORAGE_PRICING_URL = "https://azure.microsoft.com/api/v3/pricing/storage/calculator/?culture=en-in&discount=mca"
 
 def fetch_azure_storage_pricing():
-    """Fetches storage pricing data from the Azure API."""
-    response = requests.get(STORAGE_API_URL)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        print("[ERROR] Failed to fetch Azure Pricing data.")
+    """Fetches Azure Storage pricing from the API."""
+    response = requests.get(AZURE_STORAGE_PRICING_URL)
+    if response.status_code != 200:
+        print("[ERROR] Failed to fetch Azure pricing data.")
         return None
+    return response.json()
 
-def extract_options(available_operations):
-    """Extracts unique options for each category from operation slugs."""
-    options = {
-        "account_type": set(),
-        "storage_type": set(),
-        "blob_type": set(),
-        "tier": set(),
-        "replication_type": set(),
-        "operation_type": set()
+def get_price_from_offer(offer, region, is_operation=False):
+    """Retrieves price from offer data, handling both storage and operations pricing."""
+    if not offer:
+        print("[ERROR] Offer data missing!")
+        return 0
+
+    print(f"\n[DEBUG] Checking offer: {offer.get('id', 'Unknown')}")
+    print(f"[DEBUG] Available Pricing Keys: {offer.get('prices', {}).keys()}")
+
+    # Define pricing keys for different cases
+    price_keys = ["perOperation", "per10kOperations", "per100kOperations", "per10k"] if is_operation else ["pergb"]
+
+    for key in price_keys:
+        if key in offer["prices"]:
+            if region in offer["prices"][key]:  # ✅ Fix: Now correctly checking for region inside per10k
+                price = offer["prices"][key][region].get("value", 0)
+                print(f"[DEBUG] Found {key} price in {region}: {price}")
+                return price  # No division, return exact API price
+
+    print(f"[WARNING] No valid price found for {region}.")
+    return 0
+
+    print(f"[WARNING] No valid price found for {region}.")
+    return 0
+
+def list_available_options(storage_data):
+    """Extracts and lists available storage types and operation types."""
+    storage_types = list(storage_data["offers"].keys())
+    return {
+        "storage_types": storage_types,
+        "operation_types": storage_types  # Since operations are also under the same structure
     }
 
-    for operation in available_operations:
-        parts = operation.split("-")
-        if len(parts) >= 6:
-            options["account_type"].add(parts[0] + "-" + parts[1])
-            options["storage_type"].add(parts[2])
-            options["blob_type"].add(parts[3])
-            options["tier"].add(parts[4])
-            options["replication_type"].add(parts[5])
-            options["operation_type"].add("-".join(parts[6:]))
-
-    return {key: sorted(value) for key, value in options.items()}
-
-def select_option(prompt, options):
-    """Prompts the user to select an option from available choices."""
-    print(f"\n{prompt}")
-    for i, option in enumerate(options, start=1):
-        print(f"{i}. {option}")
-
-    while True:
-        try:
-            choice = int(input("Enter choice: "))
-            if 1 <= choice <= len(options):
-                return options[choice - 1]
-            else:
-                print("[ERROR] Invalid selection. Try again.")
-        except ValueError:
-            print("[ERROR] Please enter a valid number.")
-
-def get_price_from_offer(offer, region):
-    """Retrieves price based on operation type."""
-    if not offer or "prices" not in offer:
-        return None  # No valid offer
-
-    for unit in ["peroperation", "per100", "per1000", "per10k", "per10000", "per1000000"]:
-        if unit in offer["prices"]:
-            unit_price = offer["prices"][unit].get(region, {}).get("value", 0)
-            if unit_price > 0:
-                return unit_price, unit  # Return price and unit type
-    
-    return None, None  # No valid price found
+def get_user_selection(options, prompt):
+    """Prompts user to select an option and returns the slug."""
+    print(f"\nAvailable {prompt}:")
+    print("  ", " | ".join(options))  # Display only slug values
+    selection = input(f"Enter {prompt} (slug): ").strip()
+    while selection not in options:
+        print("[ERROR] Invalid selection. Try again.")
+        selection = input(f"Enter {prompt} (slug): ").strip()
+    return selection
 
 def main():
-    """Main execution function."""
-    storage_data = fetch_azure_storage_pricing()
-    if not storage_data:
+    """Main function to calculate Azure Storage pricing."""
+    print("Fetching Azure Pricing Data...")
+    azure_pricing = fetch_azure_storage_pricing()
+    if not azure_pricing:
         return
 
-    available_operations = list(storage_data["offers"].keys())
-    extracted_options = extract_options(available_operations)
+    offers = azure_pricing.get("offers", {})
+    options = list_available_options(azure_pricing)
 
-    # Step-by-step user input selection
-    account_type = select_option("Select Account Type:", extracted_options["account_type"])
-    storage_type = select_option("Select Storage Type:", extracted_options["storage_type"])
-    blob_type = select_option("Select Blob Type:", extracted_options["blob_type"])
-    tier = select_option("Select Storage Tier:", extracted_options["tier"])
-    replication_type = select_option("Select Replication Type:", extracted_options["replication_type"])
-    operation_type = select_option("Select Operation Type:", extracted_options["operation_type"])
+    # Step 1: Get user input
+    storage_type = get_user_selection(options["storage_types"], "Storage Type")
+    operation_type = get_user_selection(options["operation_types"], "Operation Type")
 
-    operation_slug = f"{account_type}-{storage_type}-{blob_type}-{tier}-{replication_type}-{operation_type}"
-    print(f"\nSelected Operation: {operation_slug}")
+    capacity_gb = float(input("Enter Storage Capacity in GB: "))
+    num_operations = int(input("Enter Number of Operations: "))
 
-    # Get available regions
-    first_offer = next(iter(storage_data["offers"].values()))
-    available_regions = list(next(iter(first_offer["prices"].values())).keys())
+    # Step 2: Extract storage and operation pricing
+    storage_offer = offers.get(storage_type, {})
+    operation_offer = offers.get(operation_type, {})
 
-    region = select_option("Select Region:", available_regions)
+    region = "us-east"  # Hardcoded for now, can be made user-selectable
 
-    try:
-        num_operations = int(input("Enter Number of Operations: "))
-    except ValueError:
-        print("[ERROR] Invalid number of operations.")
-        return
+    storage_price_per_gb = get_price_from_offer(storage_offer, region, is_operation=False)
+    operation_price_per_op = get_price_from_offer(operation_offer, region, is_operation=True)
 
-    operation_offer = storage_data["offers"].get(operation_slug)
-    if not operation_offer:
-        print(f"[ERROR] No valid storage offer found for {operation_slug}")
-        return
+    # Step 3: Calculate costs
+    storage_cost = storage_price_per_gb * capacity_gb
+    operation_cost = operation_price_per_op * num_operations
+    total_cost = storage_cost + operation_cost
 
-    unit_price, unit_type = get_price_from_offer(operation_offer, region)
-    
-    if unit_price is None:
-        print("[ERROR] No valid price found.")
-        return
-
-    total_cost = num_operations * unit_price  # Only multiplication, no division
-
-    # Display result in Azure-style format
-    print("\n=== Pricing Breakdown ===")
-    print(f"{num_operations} × ${unit_price:.3f} = ${total_cost:.2f}")
+    # Step 4: Display Results
+    print("\n=== Azure Storage Pricing Calculation ===")
     print(f"Region: {region}")
-    print(f"Operation Type: {operation_slug}")
-    print(f"Number of Operations: {num_operations}")
-    print(f"Total Operations Cost: ${total_cost:.2f}")
+    print(f"Storage Type: {storage_type}")
+    print(f"Operations Type: {operation_type}")
+    print(f"Capacity: {capacity_gb} GB")
+    print(f"Operations: {num_operations}\n")
+
+    print("=== Pricing Breakdown ===")
+    print(f"Storage Cost: ${storage_cost:.2f} (Price per GB: ${storage_price_per_gb:.6f})")
+    print(f"Operation Cost: ${operation_cost:.6f} (Price per Operation: ${operation_price_per_op:.9f})")
+
+    print("\nTotal Monthly Cost: ${:.6f}".format(total_cost))
 
 if __name__ == "__main__":
     main()
